@@ -119,7 +119,7 @@ Transforms Polish KSeF FA(3) VAT invoices into KOR (correction) invoices.
 ```bash
 python3 convert.py \
   --plugin plugins/fa3-kor \
-  --input  path/to/invoices \
+  --input  path/to/documents \
   --output path/to/output \
   --schema plugins/fa3-kor/schemat.xsd
 ```
