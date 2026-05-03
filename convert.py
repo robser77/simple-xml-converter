@@ -147,6 +147,10 @@ def run_pipeline(
     if check_only:
         for xml_file in xml_files:
             print(f"\nChecking: {xml_file.name}")
+            if input_schema:
+                validate_xsd(input_schema, xml_file, input_schema_file, label="INPUT XSD")
+            else:
+                print(_fmt("  [INPUT XSD SKIP]", "no input schema provided"))
             if input_sch is not None:
                 failures = validate_schematron(xml_file, input_sch)
                 if failures:
@@ -156,11 +160,7 @@ def run_pipeline(
                     sys.exit(1)
                 print(_fmt("  [INPUT OK]", str(input_sch)))
             else:
-                print(_fmt("  [INPUT SKIP]", "no input_check.sch"))
-            if input_schema:
-                validate_xsd(input_schema, xml_file, input_schema_file, label="INPUT XSD")
-            else:
-                print(_fmt("  [INPUT XSD SKIP]", "no input schema provided"))
+                print(_fmt("  [INPUT SCH SKIP]", "no input_check.sch"))
         return
 
     schema = load_schema(schema_file)
@@ -185,6 +185,11 @@ def run_pipeline(
         for xml_file in xml_files:
             print(f"\nProcessing: {xml_file.name}")
 
+            if input_schema:
+                validate_xsd(input_schema, xml_file, input_schema_file, label="INPUT XSD")
+            else:
+                print(_fmt("  [INPUT XSD SKIP]", "no input schema provided"))
+
             if input_sch is not None:
                 failures = validate_schematron(xml_file, input_sch)
                 if failures:
@@ -194,12 +199,7 @@ def run_pipeline(
                     sys.exit(1)
                 print(_fmt("  [INPUT OK]", str(input_sch)))
             else:
-                print(_fmt("  [INPUT SKIP]", "no input_check.sch"))
-
-            if input_schema:
-                validate_xsd(input_schema, xml_file, input_schema_file, label="INPUT XSD")
-            else:
-                print(_fmt("  [INPUT XSD SKIP]", "no input schema provided"))
+                print(_fmt("  [INPUT SCH SKIP]", "no input_check.sch"))
 
             out_file = output_dir / (xml_file.stem + "_output.xml")
             try:
@@ -218,7 +218,7 @@ def run_pipeline(
             if schema:
                 validate_xsd(schema, out_file, schema_file)
             else:
-                print(_fmt("  [XSD SKIP]", "no schema provided"))
+                print(_fmt("  [OUTPUT XSD SKIP]", "no schema provided"))
 
             if output_sch is not None:
                 failures = validate_schematron(out_file, output_sch)
@@ -229,7 +229,7 @@ def run_pipeline(
                     sys.exit(1)
                 print(_fmt("  [OUTPUT OK]", str(output_sch)))
             else:
-                print(_fmt("  [OUTPUT SKIP]", "no output_check.sch"))
+                print(_fmt("  [OUTPUT SCH SKIP]", "no output_check.sch"))
 
 
 def resolve_schematron(plugin_dir: Path, arg: str | None, default_name: str) -> Path | None:

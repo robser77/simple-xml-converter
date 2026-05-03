@@ -142,8 +142,8 @@ def test_pipeline_no_schematron(tmp_path, capsys):
     (input_dir / "doc.xml").write_text(SIMPLE_XML)
     run_pipeline(plugin, input_dir, tmp_path / "output", lookup_file=None, schema_file=None)
     out = capsys.readouterr().out
-    assert "[INPUT SKIP]" in out
-    assert "[OUTPUT SKIP]" in out
+    assert "[INPUT SCH SKIP]" in out
+    assert "[OUTPUT SCH SKIP]" in out
 
 
 @pytest.mark.integration
