@@ -49,11 +49,18 @@ SIMPLE_XSD = """\
 </xs:schema>"""
 
 
-def _make_plugin(plugin_dir: Path, xsl: str, input_sch: str = PASS_SCH, output_sch: str = PASS_SCH) -> None:
+def _make_plugin(
+    plugin_dir: Path,
+    xsl: str,
+    input_sch: str | None = PASS_SCH,
+    output_sch: str | None = PASS_SCH,
+) -> None:
     plugin_dir.mkdir()
-    (plugin_dir / "input_check.sch").write_text(input_sch)
+    if input_sch is not None:
+        (plugin_dir / "input_check.sch").write_text(input_sch)
     (plugin_dir / "transform.xsl").write_text(xsl)
-    (plugin_dir / "output_check.sch").write_text(output_sch)
+    if output_sch is not None:
+        (plugin_dir / "output_check.sch").write_text(output_sch)
 
 
 @pytest.mark.integration
@@ -127,6 +134,19 @@ def test_pipeline_output_schematron_fails(tmp_path, capsys):
 
 
 @pytest.mark.integration
+def test_pipeline_no_schematron(tmp_path, capsys):
+    plugin = tmp_path / "plugin"
+    _make_plugin(plugin, IDENTITY_XSL, input_sch=None, output_sch=None)
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "doc.xml").write_text(SIMPLE_XML)
+    run_pipeline(plugin, input_dir, tmp_path / "output", lookup_file=None, schema_file=None)
+    out = capsys.readouterr().out
+    assert "[INPUT SKIP]" in out
+    assert "[OUTPUT SKIP]" in out
+
+
+@pytest.mark.integration
 def test_pipeline_xsd_validation_passes(tmp_path, capsys):
     plugin = tmp_path / "plugin"
     _make_plugin(plugin, IDENTITY_XSL)
@@ -137,3 +157,36 @@ def test_pipeline_xsd_validation_passes(tmp_path, capsys):
     xsd.write_text(SIMPLE_XSD)
     run_pipeline(plugin, input_dir, tmp_path / "output", None, xsd)
     assert "[XSD OK]" in capsys.readouterr().out
+
+
+@pytest.mark.integration
+def test_pipeline_xsd_auto_detected_from_plugin(tmp_path, capsys):
+    from convert import resolve_schema
+    plugin = tmp_path / "plugin"
+    _make_plugin(plugin, IDENTITY_XSL)
+    out_schema_dir = plugin / "output_schema"
+    out_schema_dir.mkdir()
+    (out_schema_dir / "schema.xsd").write_text(SIMPLE_XSD)
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "doc.xml").write_text(SIMPLE_XML)
+    schema_file = resolve_schema(plugin, None, "output_schema")
+    run_pipeline(plugin, input_dir, tmp_path / "output", lookup_file=None, schema_file=schema_file)
+    assert "[XSD OK]" in capsys.readouterr().out
+
+
+@pytest.mark.integration
+def test_pipeline_input_xsd_auto_detected_from_plugin(tmp_path, capsys):
+    from convert import resolve_schema
+    plugin = tmp_path / "plugin"
+    _make_plugin(plugin, IDENTITY_XSL)
+    in_schema_dir = plugin / "input_schema"
+    in_schema_dir.mkdir()
+    (in_schema_dir / "schema.xsd").write_text(SIMPLE_XSD)
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "doc.xml").write_text(SIMPLE_XML)
+    input_schema_file = resolve_schema(plugin, None, "input_schema")
+    run_pipeline(plugin, input_dir, tmp_path / "output", lookup_file=None, schema_file=None,
+                 input_schema_file=input_schema_file)
+    assert "[INPUT XSD OK]" in capsys.readouterr().out

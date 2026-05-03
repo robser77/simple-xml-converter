@@ -1,6 +1,6 @@
 import pytest
 from lxml import etree
-from convert import validate_schematron, load_schema, validate_xsd, validate_plugin
+from convert import validate_schematron, load_schema, validate_xsd, validate_plugin, resolve_schema, resolve_schematron
 
 
 PASS_SCH = """\
@@ -106,8 +106,10 @@ def test_validate_xsd_passes(tmp_path, capsys):
     schema = load_schema(xsd)
     doc = tmp_path / "doc.xml"
     doc.write_text(SIMPLE_XML)
-    validate_xsd(schema, doc)
-    assert "[XSD OK]" in capsys.readouterr().out
+    validate_xsd(schema, doc, xsd)
+    out = capsys.readouterr().out
+    assert "[XSD OK]" in out
+    assert "schema.xsd" in out
 
 def test_validate_xsd_fails(tmp_path, capsys):
     xsd = tmp_path / "schema.xsd"
@@ -116,8 +118,10 @@ def test_validate_xsd_fails(tmp_path, capsys):
     doc = tmp_path / "doc.xml"
     doc.write_text("<wrong/>")
     with pytest.raises(SystemExit):
-        validate_xsd(schema, doc)
-    assert "[XSD FAIL]" in capsys.readouterr().out
+        validate_xsd(schema, doc, xsd)
+    out = capsys.readouterr().out
+    assert "[XSD FAIL]" in out
+    assert "schema.xsd" in out
 
 
 # --- validate_plugin ---
@@ -130,13 +134,17 @@ def test_validate_plugin_dir_missing(tmp_path, capsys):
 def test_validate_plugin_artifacts_missing(tmp_path, capsys):
     plugin = tmp_path / "plugin"
     plugin.mkdir()
-    (plugin / "input_check.sch").write_text("")
     with pytest.raises(SystemExit):
         validate_plugin(plugin)
     out = capsys.readouterr().out
     assert "[ERROR]" in out
     assert "transform.xsl" in out
-    assert "output_check.sch" in out
+
+def test_validate_plugin_sch_files_optional(tmp_path):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "transform.xsl").write_text("")
+    validate_plugin(plugin)  # should not raise without .sch files
 
 def test_validate_plugin_all_present(tmp_path):
     plugin = tmp_path / "plugin"
@@ -144,3 +152,73 @@ def test_validate_plugin_all_present(tmp_path):
     for name in ("input_check.sch", "transform.xsl", "output_check.sch"):
         (plugin / name).write_text("")
     validate_plugin(plugin)  # should not raise
+
+
+# --- resolve_schema ---
+
+def test_resolve_schema_explicit_arg(tmp_path):
+    xsd = tmp_path / "schema.xsd"
+    xsd.write_text(SIMPLE_XSD)
+    assert resolve_schema(tmp_path, str(xsd), "output_schema") == xsd
+
+def test_resolve_schema_explicit_arg_missing(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        resolve_schema(tmp_path, str(tmp_path / "nonexistent.xsd"), "output_schema")
+    assert "[ERROR]" in capsys.readouterr().out
+
+def test_resolve_schema_auto_detect(tmp_path):
+    subdir = tmp_path / "output_schema"
+    subdir.mkdir()
+    xsd = subdir / "schema.xsd"
+    xsd.write_text(SIMPLE_XSD)
+    assert resolve_schema(tmp_path, None, "output_schema") == xsd
+
+def test_resolve_schema_no_xsd(tmp_path):
+    assert resolve_schema(tmp_path, None, "output_schema") is None
+
+def test_resolve_schema_no_subdir(tmp_path):
+    assert resolve_schema(tmp_path, None, "output_schema") is None
+
+def test_resolve_schema_multiple_xsd_warns(tmp_path, capsys):
+    subdir = tmp_path / "output_schema"
+    subdir.mkdir()
+    for name in ("a.xsd", "b.xsd"):
+        (subdir / name).write_text(SIMPLE_XSD)
+    result = resolve_schema(tmp_path, None, "output_schema")
+    assert result == subdir / "a.xsd"
+    assert "[WARN]" in capsys.readouterr().out
+
+def test_resolve_schema_input_subdir(tmp_path):
+    subdir = tmp_path / "input_schema"
+    subdir.mkdir()
+    xsd = subdir / "schema.xsd"
+    xsd.write_text(SIMPLE_XSD)
+    assert resolve_schema(tmp_path, None, "input_schema") == xsd
+
+
+# --- resolve_schematron ---
+
+def test_resolve_schematron_explicit_arg(tmp_path):
+    sch = tmp_path / "custom.sch"
+    sch.write_text(PASS_SCH)
+    assert resolve_schematron(tmp_path, str(sch), "input_check.sch") == sch
+
+def test_resolve_schematron_explicit_arg_missing(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        resolve_schematron(tmp_path, str(tmp_path / "nonexistent.sch"), "input_check.sch")
+    assert "[ERROR]" in capsys.readouterr().out
+
+def test_resolve_schematron_auto_detect(tmp_path):
+    sch = tmp_path / "input_check.sch"
+    sch.write_text(PASS_SCH)
+    assert resolve_schematron(tmp_path, None, "input_check.sch") == sch
+
+def test_resolve_schematron_no_file(tmp_path):
+    assert resolve_schematron(tmp_path, None, "input_check.sch") is None
+
+def test_resolve_schematron_explicit_overrides_plugin(tmp_path):
+    plugin_sch = tmp_path / "input_check.sch"
+    plugin_sch.write_text(PASS_SCH)
+    custom_sch = tmp_path / "other.sch"
+    custom_sch.write_text(PASS_SCH)
+    assert resolve_schematron(tmp_path, str(custom_sch), "input_check.sch") == custom_sch

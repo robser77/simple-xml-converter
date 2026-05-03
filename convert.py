@@ -76,12 +76,21 @@ def load_schema(schema_file: Path | None) -> etree.XMLSchema | None:
         sys.exit(1)
 
 
-def validate_xsd(schema: etree.XMLSchema, out_file: Path) -> None:
-    doc = etree.parse(str(out_file))
+def _fmt(label: str, detail: str) -> str:
+    pos = len(label)
+    tabs = 0
+    while pos < 24:
+        pos = (pos // 8 + 1) * 8
+        tabs += 1
+    return label + "\t" * tabs + detail
+
+
+def validate_xsd(schema: etree.XMLSchema, xml_file: Path, schema_path: Path, label: str = "XSD") -> None:
+    doc = etree.parse(str(xml_file))
     if schema.validate(doc):
-        print(f"  [XSD OK]")
+        print(_fmt(f"  [{label} OK]", str(schema_path)))
     else:
-        print(f"  [XSD FAIL]")
+        print(_fmt(f"  [{label} FAIL]", str(schema_path)))
         for err in schema.error_log:
             print(f"             line {err.line}: {err.message}")
         sys.exit(1)
@@ -92,7 +101,7 @@ def validate_plugin(plugin_dir: Path) -> None:
         print(f"[ERROR] Plugin directory not found: {plugin_dir}")
         sys.exit(1)
     missing = [
-        name for name in ("input_check.sch", "transform.xsl", "output_check.sch")
+        name for name in ("transform.xsl",)
         if not (plugin_dir / name).exists()
     ]
     if missing:
@@ -109,6 +118,9 @@ def run_pipeline(
     lookup_file: Path | None,
     schema_file: Path | None,
     check_only: bool = False,
+    input_sch: Path | None = None,
+    output_sch: Path | None = None,
+    input_schema_file: Path | None = None,
 ) -> None:
     validate_plugin(plugin_dir)
 
@@ -116,25 +128,39 @@ def run_pipeline(
         print(f"[ERROR] Input directory not found: {input_dir}")
         sys.exit(1)
 
-    input_sch = plugin_dir / "input_check.sch"
+    if input_sch is None:
+        candidate = plugin_dir / "input_check.sch"
+        input_sch = candidate if candidate.exists() else None
+    if output_sch is None:
+        candidate = plugin_dir / "output_check.sch"
+        output_sch = candidate if candidate.exists() else None
+
     transform_xsl = plugin_dir / "transform.xsl"
-    output_sch = plugin_dir / "output_check.sch"
 
     xml_files = sorted(input_dir.glob("*.xml"))
     if not xml_files:
         print(f"No XML files found in {input_dir}")
         return
 
+    input_schema = load_schema(input_schema_file)
+
     if check_only:
         for xml_file in xml_files:
             print(f"\nChecking: {xml_file.name}")
-            failures = validate_schematron(xml_file, input_sch)
-            if failures:
-                print(f"  [INPUT FAIL]")
-                for msg in failures:
-                    print(f"               {msg}")
-                sys.exit(1)
-            print(f"  [INPUT OK]")
+            if input_sch is not None:
+                failures = validate_schematron(xml_file, input_sch)
+                if failures:
+                    print(_fmt("  [INPUT FAIL]", str(input_sch)))
+                    for msg in failures:
+                        print(f"               {msg}")
+                    sys.exit(1)
+                print(_fmt("  [INPUT OK]", str(input_sch)))
+            else:
+                print(_fmt("  [INPUT SKIP]", "no input_check.sch"))
+            if input_schema:
+                validate_xsd(input_schema, xml_file, input_schema_file, label="INPUT XSD")
+            else:
+                print(_fmt("  [INPUT XSD SKIP]", "no input schema provided"))
         return
 
     schema = load_schema(schema_file)
@@ -159,13 +185,21 @@ def run_pipeline(
         for xml_file in xml_files:
             print(f"\nProcessing: {xml_file.name}")
 
-            failures = validate_schematron(xml_file, input_sch)
-            if failures:
-                print(f"  [INPUT FAIL]")
-                for msg in failures:
-                    print(f"               {msg}")
-                sys.exit(1)
-            print(f"  [INPUT OK]")
+            if input_sch is not None:
+                failures = validate_schematron(xml_file, input_sch)
+                if failures:
+                    print(_fmt("  [INPUT FAIL]", str(input_sch)))
+                    for msg in failures:
+                        print(f"               {msg}")
+                    sys.exit(1)
+                print(_fmt("  [INPUT OK]", str(input_sch)))
+            else:
+                print(_fmt("  [INPUT SKIP]", "no input_check.sch"))
+
+            if input_schema:
+                validate_xsd(input_schema, xml_file, input_schema_file, label="INPUT XSD")
+            else:
+                print(_fmt("  [INPUT XSD SKIP]", "no input schema provided"))
 
             out_file = output_dir / (xml_file.stem + "_output.xml")
             try:
@@ -179,20 +213,52 @@ def run_pipeline(
             if not out_file.exists():
                 print(f"  [TRANSFORM FAIL] no output produced")
                 sys.exit(1)
-            print(f"  [TRANSFORM] -> {out_file.name}")
+            print(_fmt("  [TRANSFORM]", f"-> {out_file.name}"))
 
             if schema:
-                validate_xsd(schema, out_file)
+                validate_xsd(schema, out_file, schema_file)
             else:
-                print(f"  [XSD SKIP]  no schema provided")
+                print(_fmt("  [XSD SKIP]", "no schema provided"))
 
-            failures = validate_schematron(out_file, output_sch)
-            if failures:
-                print(f"  [OUTPUT FAIL]")
-                for msg in failures:
-                    print(f"                {msg}")
-                sys.exit(1)
-            print(f"  [OUTPUT OK]")
+            if output_sch is not None:
+                failures = validate_schematron(out_file, output_sch)
+                if failures:
+                    print(_fmt("  [OUTPUT FAIL]", str(output_sch)))
+                    for msg in failures:
+                        print(f"                {msg}")
+                    sys.exit(1)
+                print(_fmt("  [OUTPUT OK]", str(output_sch)))
+            else:
+                print(_fmt("  [OUTPUT SKIP]", "no output_check.sch"))
+
+
+def resolve_schematron(plugin_dir: Path, arg: str | None, default_name: str) -> Path | None:
+    if arg:
+        p = Path(arg)
+        if not p.exists():
+            print(f"[ERROR] Schematron file not found: {p}")
+            sys.exit(1)
+        return p
+    candidate = plugin_dir / default_name
+    return candidate if candidate.exists() else None
+
+
+def resolve_schema(plugin_dir: Path, schema_arg: str | None, subdir: str) -> Path | None:
+    if schema_arg:
+        p = Path(schema_arg)
+        if not p.exists():
+            print(f"[ERROR] Schema file not found: {p}")
+            sys.exit(1)
+        return p
+    search_dir = plugin_dir / subdir
+    if not search_dir.is_dir():
+        return None
+    xsd_files = sorted(search_dir.glob("*.xsd"))
+    if len(xsd_files) > 1:
+        print(f"[WARN] Multiple XSD files found in {search_dir}, using {xsd_files[0].name}")
+    if xsd_files:
+        return xsd_files[0]
+    return None
 
 
 def resolve_lookup(plugin_dir: Path, lookup_arg: str | None) -> Path | None:
@@ -224,8 +290,14 @@ def main():
                         help="Directory for transformed output XML files (default: output)")
     parser.add_argument("--lookup", metavar="FILE",
                         help="XML lookup file; passed to XSLT as $lookupFile (overrides plugin CSV)")
-    parser.add_argument("--schema", metavar="FILE",
-                        help="XSD entry-point file for output validation; imports resolved from its directory")
+    parser.add_argument("--input-schema", metavar="FILE",
+                        help="XSD entry-point file for input validation (overrides plugin input_schema/*.xsd)")
+    parser.add_argument("--output-schema", metavar="FILE",
+                        help="XSD entry-point file for output validation (overrides plugin output_schema/*.xsd)")
+    parser.add_argument("--input-check", metavar="FILE",
+                        help="Schematron file for input validation (overrides plugin input_check.sch)")
+    parser.add_argument("--output-check", metavar="FILE",
+                        help="Schematron file for output validation (overrides plugin output_check.sch)")
     parser.add_argument("--check-only", action="store_true",
                         help="Validate inputs against input_check.sch only; skip transform and output check")
     args = parser.parse_args()
@@ -236,8 +308,13 @@ def main():
     output_dir.mkdir(exist_ok=True)
 
     lookup_file = resolve_lookup(plugin_dir, args.lookup)
-    schema_file = Path(args.schema) if args.schema else None
-    run_pipeline(plugin_dir, input_dir, output_dir, lookup_file, schema_file, check_only=args.check_only)
+    input_schema_file = resolve_schema(plugin_dir, args.input_schema, "input_schema")
+    schema_file = resolve_schema(plugin_dir, args.output_schema, "output_schema")
+    input_sch = resolve_schematron(plugin_dir, args.input_check, "input_check.sch")
+    output_sch = resolve_schematron(plugin_dir, args.output_check, "output_check.sch")
+    run_pipeline(plugin_dir, input_dir, output_dir, lookup_file, schema_file,
+                 check_only=args.check_only, input_sch=input_sch, output_sch=output_sch,
+                 input_schema_file=input_schema_file)
 
 
 if __name__ == "__main__":
