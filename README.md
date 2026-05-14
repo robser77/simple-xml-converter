@@ -12,10 +12,10 @@ input_check.sch  →  transform.xsl  →  [XSD validation]  →  output_check.sc
 
 | Step | Artifact | Required |
 |---|---|---|
-| Input Schematron | `input_check.sch` | yes |
+| Input Schematron | `input_check.sch` | no |
 | XSLT transform | `transform.xsl` | yes |
 | XSD validation | provided via `--schema` | no |
-| Output Schematron | `output_check.sch` | yes |
+| Output Schematron | `output_check.sch` | no |
 
 The pipeline stops on the first failure in any step.
 
@@ -26,19 +26,27 @@ python3 convert.py \
   --plugin <plugin-dir> \
   --input  <input-dir> \
   --output <output-dir> \
-  [--schema <schema.xsd>] \
-  [--lookup <lookup.xml>]
+  [--lookup <lookup.xml>] \
+  [--input-schema <schema.xsd>] \
+  [--output-schema <schema.xsd>] \
+  [--input-check <check.sch>] \
+  [--output-check <check.sch>] \
+  [--check-only]
 ```
 
 ### Arguments
 
 | Argument | Description |
 |---|---|
-| `--plugin DIR` | Plugin directory containing `input_check.sch`, `transform.xsl`, and `output_check.sch` |
-| `--input DIR` | Directory of input XML files to process |
-| `--output DIR` | Directory where transformed output files are written (created if missing) |
-| `--schema FILE` | XSD entry-point file for structural validation of the output; XSD imports are resolved relative to the schema file's directory. If omitted, the XSD step is skipped and reported as `[XSD SKIP]` |
+| `--plugin DIR` | Plugin directory containing `transform.xsl` and optional schematron/schema artifacts |
+| `--input DIR` | Directory of input XML files to process (default: `documents`) |
+| `--output DIR` | Directory where transformed output files are written, created if missing (default: `output`) |
 | `--lookup FILE` | XML lookup file passed to the XSLT as `$lookupFile`; overrides a plugin-bundled CSV |
+| `--input-schema FILE` | XSD entry-point file for input validation; overrides a plugin-bundled `input_schema/*.xsd` |
+| `--output-schema FILE` | XSD entry-point file for output validation; overrides a plugin-bundled `output_schema/*.xsd` |
+| `--input-check FILE` | Schematron file for input validation; overrides the plugin's `input_check.sch` |
+| `--output-check FILE` | Schematron file for output validation; overrides the plugin's `output_check.sch` |
+| `--check-only` | Run input Schematron validation only; skip the transform and output check |
 
 ### Lookup data (CSV auto-detection)
 
@@ -56,7 +64,7 @@ Each input file `<name>.xml` produces `<name>_output.xml` in the output director
 plugins/
 └── my-plugin/
     ├── input_check.sch    # Schematron: validates input before transformation
-    ├── transform.xsl      # XSLT 2.0: transforms the input to the target format
+    ├── transform.xsl      # XSLT 2.0 or 3.0: transforms the input to the target format
     ├── output_check.sch   # Schematron: validates business rules on the output
     └── data.csv           # Optional: lookup data, auto-converted to XML
 ```
@@ -84,7 +92,35 @@ If a lookup file is provided (via CSV auto-detection or `--lookup`), it is passe
 Starter templates for new plugins are in `plugins/templates/`:
 
 - `check.sch` — Schematron with a commented-out namespace declaration and one always-failing assert as a placeholder
-- `transform.xsl` — XSLT 2.0 with only the identity transform
+- `transform.xsl` — XSLT 2.0 with only the identity transform (upgrade to 3.0 if your plugin needs it)
+
+## Bundled plugin: ubl-anonymizer
+
+Anonymizes UBL XML documents by replacing identifying party and payment data with fake but structurally valid equivalents. Intended for sharing or testing real invoices without exposing customer or supplier information.
+
+**What is replaced:**
+- Party names (trading name, legal name)
+- Postal addresses (street, city, postal zone; country code is preserved)
+- VAT and company registration numbers
+- Contact details (name, phone, email)
+- Endpoint IDs and party IDs
+- Payment account details (IBAN, account name, BIC)
+- Delivery location ID and address
+
+**Country support:** DE, AT, GB, FR, SE, NL, PL. Any other country code falls back to a generic English data set; the original country code in the document is always kept.
+
+No `input_check.sch` or `output_check.sch` — the plugin only provides the transform.
+
+**Example invocation:**
+
+```bash
+python3 convert.py \
+  --plugin plugins/ubl-anonymizer \
+  --input  path/to/documents \
+  --output path/to/output
+```
+
+---
 
 ## Bundled plugin: fa3-kor
 
@@ -126,5 +162,5 @@ python3 convert.py \
 
 ## Dependencies
 
-- [`saxonche`](https://pypi.org/project/saxonche/) — Saxon-HE Python binding for XSLT 2.0 processing
+- [`saxonche`](https://pypi.org/project/saxonche/) — Saxon-HE Python binding for XSLT 2.0/3.0 processing
 - [`lxml`](https://pypi.org/project/lxml/) — XML parsing, XSD validation, and ISO Schematron validation
